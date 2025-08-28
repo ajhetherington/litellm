@@ -365,6 +365,7 @@ def _transform_request_body(
         generation_config: Optional[GenerationConfig] = GenerationConfig(
             **filtered_params
         )
+        labels = optional_params.get("labels")
         data = RequestBody(contents=content)
         if system_instructions is not None:
             data["system_instruction"] = system_instructions
@@ -378,6 +379,8 @@ def _transform_request_body(
             data["generationConfig"] = generation_config
         if cached_content is not None:
             data["cachedContent"] = cached_content
+        if labels is not None:
+            data["labels"] = labels
     except Exception as e:
         raise e
 

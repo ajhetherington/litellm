@@ -212,11 +212,12 @@ class GCSBucketBase(CustomBatchLogger):
         """
         return credentials or IAM_AUTH_KEY
 
-    async def download_gcs_object(self, object_name: str, **kwargs):
+    async def _get_gcs_object(self, object_name: str, return_content: bool = True, **kwargs):
         """
-        Download an object from GCS.
+        Make a GET request to a GCS bucket for a particular object
 
-        https://cloud.google.com/storage/docs/downloading-objects#download-object-json
+        if `return_content`, will use the alt=media queryparam to return the content,
+        else will return metadata for the object
         """
         try:
             gcs_logging_config: GCSLoggingConfig = await self.get_gcs_logging_config(
@@ -232,10 +233,13 @@ class GCSBucketBase(CustomBatchLogger):
                 object_name=object_name,
             )
 
-            url = f"https://storage.googleapis.com/storage/v1/b/{bucket_name}/o/{object_name}?alt=media"
+            url = f"https://storage.googleapis.com/storage/v1/b/{bucket_name}/o/{object_name}"
 
-            # Send the GET request to download the object
-            response = await self.async_httpx_client.get(url=url, headers=headers)
+            params = {}
+            if return_content:
+                params["alt"] = "media"
+
+            response = await self.async_httpx_client.get(url=url, headers=headers, params=params)
 
             if response.status_code != 200:
                 verbose_logger.error(
@@ -247,12 +251,22 @@ class GCSBucketBase(CustomBatchLogger):
                 "GCS object download response status code: %s", response.status_code
             )
 
-            # Return the content of the downloaded object
-            return response.content
-
+            return response
         except Exception as e:
             verbose_logger.error("GCS object download error: %s", str(e))
             return None
+
+
+    async def download_gcs_object(self, object_name: str, **kwargs) -> bytes | None:
+        """
+        Download an object from GCS.
+
+        https://cloud.google.com/storage/docs/downloading-objects#download-object-json
+        """
+        response = await self._get_gcs_object(object_name=object_name, return_content=True)
+        if not response:
+            return None
+        return response.content
 
     async def delete_gcs_object(self, object_name: str, **kwargs):
         """

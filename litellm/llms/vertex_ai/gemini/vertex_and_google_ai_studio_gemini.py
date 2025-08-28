@@ -614,6 +614,8 @@ class VertexGeminiConfig(VertexAIBaseConfig, BaseConfig):
                 optional_params = self._add_tools_to_optional_params(
                     optional_params, [_tools]
                 )
+            elif param == "metadata":
+                optional_params["labels"] = value
         if litellm.vertex_ai_safety_settings is not None:
             optional_params["safety_settings"] = litellm.vertex_ai_safety_settings
 
@@ -1293,7 +1295,7 @@ class VertexGeminiConfig(VertexAIBaseConfig, BaseConfig):
         model_response: ModelResponse,
         model: str,
         logging_obj: LoggingClass,
-        raw_response: httpx.Response,
+        raw_response: httpx.Response | None = None,
     ) -> ModelResponse:
         """
         Transforms a Google GenAI generate content response to an OpenAI model response.
@@ -1384,7 +1386,7 @@ class VertexGeminiConfig(VertexAIBaseConfig, BaseConfig):
                     completion_response, str(e)
                 ),
                 status_code=422,
-                headers=raw_response.headers,
+                headers=raw_response.headers if raw_response else {},
             )
 
         return model_response

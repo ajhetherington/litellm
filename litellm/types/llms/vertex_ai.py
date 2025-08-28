@@ -551,7 +551,7 @@ class OutputConfig(TypedDict, total=False):
 
 class GcsBucketResponse(TypedDict):
     """
-    TypedDict for GCS bucket upload response
+    TypedDict for GCS bucket upload response / get object response
 
     Attributes:
         kind: The kind of item this is. For objects, this is always storage#object

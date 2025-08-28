@@ -28,6 +28,7 @@ verbose_logger.setLevel(logging.DEBUG)
 
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.types.utils import StandardLoggingPayload
+from litellm.llms.vertex_ai.files.transformation import VertexAIJsonlFilesTransformation
 import random
 from unittest.mock import patch, MagicMock
 
@@ -533,3 +534,58 @@ async def test_avertex_batch_prediction(monkeypatch):
             print("retrieved_batch=", retrieved_batch)
 
             assert retrieved_batch.id == "test-batch-id-456"
+
+        # get file_content  
+        file_content = await litellm.afile_content(
+            file_id=file_obj.id, custom_llm_provider="vertex_ai"
+        )
+        print("file content = ", file_content)
+
+        # get file metadata
+        file_obj_metadata = await litellm.afile_retrieve(
+            file_id=file_obj.id, custom_llm_provider="vertex_ai"
+        )
+        print("file obj metadata = ", file_obj_metadata)
+
+        # delete file
+        delete_file_response = await litellm.afile_delete(
+            file_id=file_obj.id, custom_llm_provider="vertex_ai"
+        )
+        print("delete file response = ", delete_file_response)
+
+
+@pytest.fixture(scope="module")
+def vertexai_jsonl_files_transformation():
+    vertex_ai_files_transformation = VertexAIJsonlFilesTransformation()
+    return vertex_ai_files_transformation
+
+def load_directory_jsonl(file_name: str):
+    _current_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(_current_dir, file_name)
+    with open(file_path, 'rb') as infile:
+        ret = infile.read()
+    return ret
+
+def test_openai_to_vertex_ai(vertexai_jsonl_files_transformation: VertexAIJsonlFilesTransformation):
+    openai_batch_completion_jsonl = load_directory_jsonl("openai_batch_completions.jsonl")
+    vertex_ai_output, obj_name = vertexai_jsonl_files_transformation.transform_openai_file_content_to_vertex_ai_file_content(openai_file_content=openai_batch_completion_jsonl)
+
+    vertex_requests = [json.loads(v)["request"] for v in vertex_ai_output.splitlines()]
+    breakpoint()
+
+    assert len(vertex_requests) > 1
+
+    # for request in vertex_requests:
+    #     assert "labels" in request
+    #     assert "litellm_batch_custom_id" in request["labels"]
+    #     assert request["labels"]["litellm_batch_custom_id"].startswith("request-")
+
+def test_vertex_ai_to_openai(vertexai_jsonl_files_transformation: VertexAIJsonlFilesTransformation):
+    vertex_ai_batch_completion_jsonl = load_directory_jsonl("vertex_ai_gemini_response.jsonl")
+    
+    openai_output = vertexai_jsonl_files_transformation.transform_vertex_ai_file_content_to_openai_file_content(vertex_ai_batch_completion_jsonl, MagicMock())
+
+    assert len(openai_output) > 1
+    # for response in openai_output:
+    #     assert "custom_id" in response
+    #     assert response["custom_id"].startswith("request-1")

@@ -19,6 +19,7 @@ from litellm.llms.vertex_ai.gemini.transformation import _transform_request_body
 from litellm.llms.vertex_ai.gemini.vertex_and_google_ai_studio_gemini import (
     VertexGeminiConfig,
 )
+from litellm.utils import ModelResponse
 from litellm.types.llms.openai import (
     AllMessageValues,
     CreateFileRequest,
@@ -27,11 +28,14 @@ from litellm.types.llms.openai import (
     OpenAIFileObject,
     PathLike,
 )
-from litellm.types.llms.vertex_ai import GcsBucketResponse
+from litellm.types.llms.vertex_ai import GcsBucketResponse, GenerateContentResponseBody
 from litellm.types.utils import ExtractedFileData, LlmProviders
 
 from ..common_utils import VertexAIError
 from ..vertex_llm_base import VertexBase
+from litellm.types.llms.openai import OpenAIFilesPurpose
+
+VERTEX_AI_BATCH_CUSTOM_ID_LABEL_KEY = os.environ.get("VERTEX_AI_BATCH_CUSTOM_ID_LABEL_KEY", "litellm_batch_custom_id")
 
 
 class VertexAIFilesConfig(VertexBase, BaseFilesConfig):
@@ -230,8 +234,12 @@ class VertexAIFilesConfig(VertexBase, BaseFilesConfig):
         """
 
         vertex_jsonl_content = []
-        for _openai_jsonl_content in openai_jsonl_content:
+        for i, _openai_jsonl_content in enumerate(openai_jsonl_content):
             openai_request_body = _openai_jsonl_content.get("body") or {}
+            # custom_id = _openai_jsonl_content.get("custom_id", f"custom_id_{i}")
+            # openai_request_body["metadata"] = openai_request_body.get("metadata", {})
+            # openai_request_body["metadata"][VERTEX_AI_BATCH_CUSTOM_ID_LABEL_KEY] = custom_id
+
             vertex_request_body = _transform_request_body(
                 messages=openai_request_body.get("messages", []),
                 model=openai_request_body.get("model", ""),
@@ -321,7 +329,7 @@ class VertexAIFilesConfig(VertexBase, BaseFilesConfig):
             bytes=int(response_object.get("size", 0)),
             object="file",
         )
-
+    
     def get_error_class(
         self, error_message: str, status_code: int, headers: Union[Dict, Headers]
     ) -> BaseLLMException:
@@ -377,8 +385,12 @@ class VertexAIJsonlFilesTransformation(VertexGeminiConfig):
         """
 
         vertex_jsonl_content = []
-        for _openai_jsonl_content in openai_jsonl_content:
+        for i, _openai_jsonl_content in enumerate(openai_jsonl_content):
             openai_request_body = _openai_jsonl_content.get("body") or {}
+            # custom_id = _openai_jsonl_content.get("custom_id", f"custom_id_{i}")
+            # openai_request_body["metadata"] = openai_request_body.get("metadata", {})
+            # openai_request_body["metadata"][VERTEX_AI_BATCH_CUSTOM_ID_LABEL_KEY] = custom_id
+
             vertex_request_body = _transform_request_body(
                 messages=openai_request_body.get("messages", []),
                 model=openai_request_body.get("model", ""),
@@ -389,6 +401,75 @@ class VertexAIJsonlFilesTransformation(VertexGeminiConfig):
             )
             vertex_jsonl_content.append({"request": vertex_request_body})
         return vertex_jsonl_content
+    
+    def transform_vertex_ai_file_content_to_openai_file_content(
+        self, file_content: str | bytes, logging_obj: LiteLLMLoggingObj
+    ) -> list[dict[str, Any]]:
+        if isinstance(file_content, bytes):
+            file_content = file_content.decode('utf-8')
+        
+        vertex_jsonl_content = [
+            json.loads(line) for line in file_content.splitlines() if line.strip()
+        ]
+
+        openai_jsonl_content = self._transform_vertex_ai_jsonl_content_to_openai_jsonl_content(vertex_jsonl_content, logging_obj)
+        return openai_jsonl_content
+
+    def _transform_vertex_ai_jsonl_content_to_openai_jsonl_content(
+        self, vertex_jsonl_content: List[Dict[str, Any]], logging_obj: LiteLLMLoggingObj
+    ) -> List[Dict[str, Any]]:
+        """
+        # see below for going from gemini back to openai style
+        # litellm/llms/vertex_ai/gemini/vertex_and_google_ai_studio_gemini.py
+        Transforms VertexAI JSONL content to OpenAI JSONL content
+
+        Openai response:
+        {"custom_id": "request-1", "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-3.5-turbo-0125", "messages": [{"role": "system", "content": "You are a helpful assistant."},{"role": "user", "content": "Hello world!"}],"max_tokens": 1000}}
+        {"custom_id": "request-2", "method": "POST", "url": "/v1/chat/completions", "body": {"model": "gpt-3.5-turbo-0125", "messages": [{"role": "system", "content": "You are an unhelpful assistant."},{"role": "user", "content": "Hello world!"}],"max_tokens": 1000}}
+
+        jsonl body for vertex is {"request": <request_body>}
+        Example Vertex jsonl
+        {"request":{"contents": [{"role": "user", "parts": [{"text": "What is the relation between the following video and image samples?"}, {"fileData": {"fileUri": "gs://cloud-samples-data/generative-ai/video/animals.mp4", "mimeType": "video/mp4"}}, {"fileData": {"fileUri": "gs://cloud-samples-data/generative-ai/image/cricket.jpeg", "mimeType": "image/jpeg"}}]}]}}
+        {"request":{"contents": [{"role": "user", "parts": [{"text": "Describe what is happening in this video."}, {"fileData": {"fileUri": "gs://cloud-samples-data/generative-ai/video/another_video.mov", "mimeType": "video/mov"}}]}]}}
+        """
+        # vertex_cfg = VertexGeminiConfig()
+
+        openai_jsonl_content = []
+        for i, _vertex_jsonl_content in enumerate(vertex_jsonl_content):
+            model_response = ModelResponse()
+            model=_vertex_jsonl_content.get("modelVersion", "gcp-model")
+
+            # custom_id = _vertex_jsonl_content.get("request", {}).get("labels", {}).get(VERTEX_AI_BATCH_CUSTOM_ID_LABEL_KEY, f"custom_id_{i}")
+            try:
+                completion_response = GenerateContentResponseBody(**_vertex_jsonl_content.get("response", {}))
+            except Exception as e:
+                raise e
+                # raise VertexAIError(
+                #     message="Received={}, Error converting to valid response block={}. File an issue if litellm error - https://github.com/BerriAI/litellm/issues".format(
+                #         raw_response.text, str(e)
+                #     ),
+                #     status_code=422,
+                #     headers=raw_response.headers,
+                # )
+
+            model_resp = self._transform_google_generate_content_to_openai_model_response(
+                completion_response=completion_response,
+                model_response=model_response,
+                model=model,
+                logging_obj=logging_obj,
+            )
+
+            # is there an openai type for this?
+            openai_jsonl_content.append(
+                {
+                    "custom_id": "custom_id",
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": model_resp
+                }
+            )
+        return openai_jsonl_content
+
 
     def _get_gcs_object_name(
         self,
@@ -459,7 +540,8 @@ class VertexAIJsonlFilesTransformation(VertexGeminiConfig):
         return content
 
     def transform_gcs_bucket_response_to_openai_file_object(
-        self, create_file_data: CreateFileRequest, gcs_upload_response: Dict[str, Any]
+        self, purpose: OpenAIFilesPurpose, gcs_upload_response: Dict[str, Any]
+        # self, create_file_data: CreateFileRequest, gcs_upload_response: Dict[str, Any]
     ) -> OpenAIFileObject:
         """
         Transforms GCS Bucket upload file response to OpenAI FileObject
@@ -469,7 +551,7 @@ class VertexAIJsonlFilesTransformation(VertexGeminiConfig):
         gcs_id = "/".join(gcs_id.split("/")[:-1]) if gcs_id else ""
 
         return OpenAIFileObject(
-            purpose=create_file_data.get("purpose", "batch"),
+            purpose=purpose or "batch",
             id=f"gs://{gcs_id}",
             filename=gcs_upload_response.get("name", ""),
             created_at=_convert_vertex_datetime_to_openai_datetime(

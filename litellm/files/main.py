@@ -10,6 +10,7 @@ import contextvars
 import os
 from functools import partial
 from typing import Any, Coroutine, Dict, Literal, Optional, Union, cast
+from urllib.parse import unquote
 
 import httpx
 
@@ -270,7 +271,7 @@ def create_file(
 
 async def afile_retrieve(
     file_id: str,
-    custom_llm_provider: Literal["openai", "azure"] = "openai",
+    custom_llm_provider: Literal["openai", "azure", "vertex_ai"] = "openai",
     extra_headers: Optional[Dict[str, str]] = None,
     extra_body: Optional[Dict[str, str]] = None,
     **kwargs,
@@ -310,7 +311,7 @@ async def afile_retrieve(
 
 def file_retrieve(
     file_id: str,
-    custom_llm_provider: Literal["openai", "azure"] = "openai",
+    custom_llm_provider: Literal["openai", "azure", "vertex_ai"] = "openai",
     extra_headers: Optional[Dict[str, str]] = None,
     extra_body: Optional[Dict[str, str]] = None,
     **kwargs,
@@ -403,6 +404,32 @@ def file_retrieve(
                 max_retries=optional_params.max_retries,
                 file_id=file_id,
             )
+        elif custom_llm_provider == "vertex_ai":
+            api_base = optional_params.api_base or ""
+            vertex_ai_project = (
+                optional_params.vertex_project
+                or litellm.vertex_project
+                or get_secret_str("VERTEXAI_PROJECT")
+            )
+            vertex_ai_location = (
+                optional_params.vertex_location
+                or litellm.vertex_location
+                or get_secret_str("VERTEXAI_LOCATION")
+            )
+            vertex_credentials = optional_params.vertex_credentials or get_secret_str(
+                "VERTEXAI_CREDENTIALS"
+            )
+            # file id's have gcp:// as a prefix / we use the full id
+            decoded_file_id = unquote(file_id)
+            response = vertex_ai_files_instance.retrieve_file(
+                _is_async=_is_async,
+                file_id=decoded_file_id,
+                vertex_project=vertex_ai_project,
+                vertex_location=vertex_ai_location,
+                vertex_credentials=vertex_credentials,
+                timeout=timeout,
+                max_retries=optional_params.max_retries,
+            )
         else:
             raise litellm.exceptions.BadRequestError(
                 message="LiteLLM doesn't support {} for 'file_retrieve'. Only 'openai' and 'azure' are supported.".format(
@@ -424,7 +451,7 @@ def file_retrieve(
 # Delete file
 async def afile_delete(
     file_id: str,
-    custom_llm_provider: Literal["openai", "azure"] = "openai",
+    custom_llm_provider: Literal["openai", "azure", "vertex_ai"] = "openai",
     extra_headers: Optional[Dict[str, str]] = None,
     extra_body: Optional[Dict[str, str]] = None,
     **kwargs,
@@ -464,7 +491,7 @@ async def afile_delete(
 
 def file_delete(
     file_id: str,
-    custom_llm_provider: Literal["openai", "azure"] = "openai",
+    custom_llm_provider: Literal["openai", "azure", "vertex_ai"] = "openai",
     extra_headers: Optional[Dict[str, str]] = None,
     extra_body: Optional[Dict[str, str]] = None,
     **kwargs,
@@ -557,6 +584,32 @@ def file_delete(
                 file_id=file_id,
                 client=client,
                 litellm_params=litellm_params_dict,
+            )
+        elif custom_llm_provider == "vertex_ai":
+            api_base = optional_params.api_base or ""
+            vertex_ai_project = (
+                optional_params.vertex_project
+                or litellm.vertex_project
+                or get_secret_str("VERTEXAI_PROJECT")
+            )
+            vertex_ai_location = (
+                optional_params.vertex_location
+                or litellm.vertex_location
+                or get_secret_str("VERTEXAI_LOCATION")
+            )
+            vertex_credentials = optional_params.vertex_credentials or get_secret_str(
+                "VERTEXAI_CREDENTIALS"
+            )
+            # file id's have gcp:// as a prefix / we use the full id
+            decoded_file_id = unquote(file_id)
+            response = vertex_ai_files_instance.delete_file(
+                _is_async=_is_async,
+                file_id=decoded_file_id,
+                vertex_project=vertex_ai_project,
+                vertex_location=vertex_ai_location,
+                vertex_credentials=vertex_credentials,
+                timeout=timeout,
+                max_retries=optional_params.max_retries,
             )
         else:
             raise litellm.exceptions.BadRequestError(
@@ -731,11 +784,11 @@ def file_list(
 
 async def afile_content(
     file_id: str,
-    custom_llm_provider: Literal["openai", "azure"] = "openai",
+    custom_llm_provider: Literal["openai", "azure", "vertex_ai"] = "openai",
     extra_headers: Optional[Dict[str, str]] = None,
     extra_body: Optional[Dict[str, str]] = None,
     **kwargs,
-) -> HttpxBinaryResponseContent:
+) -> Union[HttpxBinaryResponseContent, bytes]:
     """
     Async: Get file contents
 
@@ -780,7 +833,7 @@ def file_content(
     extra_headers: Optional[Dict[str, str]] = None,
     extra_body: Optional[Dict[str, str]] = None,
     **kwargs,
-) -> Union[HttpxBinaryResponseContent, Coroutine[Any, Any, HttpxBinaryResponseContent]]:
+) -> Union[Union[HttpxBinaryResponseContent, bytes], Coroutine[Any, Any, Union[HttpxBinaryResponseContent, bytes]]]:
     """
     Returns the contents of the specified file.
 
@@ -814,6 +867,8 @@ def file_content(
         elif timeout is None:
             timeout = 600.0
 
+        if custom_llm_provider == "vertex_ai":
+            file_id = unquote(file_id)
         _file_content_request = FileContentRequest(
             file_id=file_id,
             extra_headers=extra_headers,
@@ -887,6 +942,38 @@ def file_content(
                 client=client,
                 litellm_params=litellm_params_dict,
             )
+        elif custom_llm_provider == "vertex_ai":
+            logging_obj = cast(
+                Optional[LiteLLMLoggingObj], kwargs.get("litellm_logging_obj")
+            )
+            if logging_obj is None:
+                raise ValueError("logging_obj is required")
+            api_base = optional_params.api_base or ""
+            vertex_ai_project = (
+                optional_params.vertex_project
+                or litellm.vertex_project
+                or get_secret_str("VERTEXAI_PROJECT")
+            )
+            vertex_ai_location = (
+                optional_params.vertex_location
+                or litellm.vertex_location
+                or get_secret_str("VERTEXAI_LOCATION")
+            )
+            vertex_credentials = optional_params.vertex_credentials or get_secret_str(
+                "VERTEXAI_CREDENTIALS"
+            )
+            response = vertex_ai_files_instance.file_content(
+                _is_async,
+                _file_content_request,
+                vertex_credentials,
+                vertex_ai_project,
+                vertex_ai_location,
+                timeout,
+                optional_params.max_retries,
+                logging_obj
+            )
+
+            # need to 
         else:
             raise litellm.exceptions.BadRequestError(
                 message="LiteLLM doesn't support {} for 'custom_llm_provider'. Supported providers are 'openai', 'azure', 'vertex_ai'.".format(
